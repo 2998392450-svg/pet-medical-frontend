@@ -1,0 +1,782 @@
+/**
+ * 宠物医疗预约系统 - 统一主题样式（粉色爪子主题）
+ * 与登录页保持一致的设计语言：
+ * - 主色：#d6709f（粉紫色）
+ * - 渐变：linear-gradient(135deg, #ff9ec7, #d6709f)
+ * - 背景：linear-gradient(135deg, #fff5f7 0%, #fef9f4 50%, #f5f0ff 100%)
+ * - 卡片：玻璃拟态（rgba 白 + backdrop-filter blur）
+ * - 圆角：14px / 20px / 28px
+ */
+
+:root {
+  --pm-primary: #d6709f;
+  --pm-primary-light: #ff9ec7;
+  --pm-primary-dark: #b85a85;
+  --pm-bg-gradient: linear-gradient(135deg, #fff5f7 0%, #fef9f4 50%, #f5f0ff 100%);
+  --pm-card-bg: rgba(255, 255, 255, 0.78);
+  --pm-card-border: rgba(255, 255, 255, 0.9);
+  --pm-shadow: 0 20px 60px rgba(214, 112, 159, 0.12), 0 2px 10px rgba(0, 0, 0, 0.03);
+  --pm-shadow-sm: 0 4px 16px rgba(214, 112, 159, 0.1);
+  --pm-text-main: #5a4a5a;
+  --pm-text-sub: #b094b8;
+  --pm-text-placeholder: #c8b0c0;
+  --pm-border-input: #ffe8f0;
+  --pm-border-input-focus: #ffb3c8;
+  --pm-radius-sm: 10px;
+  --pm-radius-md: 14px;
+  --pm-radius-lg: 20px;
+  --pm-radius-xl: 28px;
+}
+
+/* ===== 页面通用容器 ===== */
+.pm-page {
+  min-height: 100vh;
+  background: var(--pm-bg-gradient);
+  font-family: 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  color: var(--pm-text-main);
+  padding-bottom: 90px;
+  position: relative;
+}
+
+/* 背景装饰光晕 */
+.pm-page::before {
+  content: '';
+  position: fixed;
+  top: -150px;
+  right: -150px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255, 200, 220, 0.4), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.pm-page::after {
+  content: '';
+  position: fixed;
+  bottom: -150px;
+  left: -150px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(200, 180, 255, 0.35), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.pm-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== 顶部导航栏 ===== */
+.pm-nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 232, 240, 0.6);
+}
+
+.pm-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-back-btn {
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--pm-primary);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.pm-back-btn:hover {
+  background: rgba(214, 112, 159, 0.08);
+}
+
+.pm-nav-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pm-primary);
+  letter-spacing: 0.5px;
+}
+
+.pm-logo {
+  font-size: 24px;
+}
+
+.pm-logout-btn {
+  background: rgba(214, 112, 159, 0.08);
+  border: 1px solid rgba(214, 112, 159, 0.2);
+  padding: 6px 16px;
+  border-radius: 18px;
+  font-size: 13px;
+  color: var(--pm-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pm-logout-btn:hover {
+  background: rgba(214, 112, 159, 0.15);
+}
+
+/* ===== 卡片 / 区块 ===== */
+.pm-card {
+  background: var(--pm-card-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--pm-card-border);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow-sm);
+  padding: 18px;
+  margin: 12px;
+}
+
+.pm-section {
+  background: var(--pm-card-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--pm-card-border);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow-sm);
+  padding: 16px;
+  margin: 10px 12px;
+}
+
+.pm-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pm-primary);
+  margin-bottom: 14px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+/* ===== Hero 区域（用于首页大banner） ===== */
+.pm-hero {
+  background: linear-gradient(135deg, #ff9ec7 0%, #d6709f 100%);
+  padding: 36px 20px;
+  color: white;
+  text-align: center;
+  margin: 12px;
+  border-radius: var(--pm-radius-xl);
+  box-shadow: 0 10px 30px rgba(214, 112, 159, 0.25);
+}
+
+.pm-hero h1 {
+  font-size: 26px;
+  margin: 0 0 8px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.pm-hero p {
+  font-size: 14px;
+  margin: 0 0 18px;
+  opacity: 0.92;
+}
+
+.pm-hero-btn {
+  display: inline-block;
+  padding: 11px 32px;
+  background: white;
+  color: var(--pm-primary);
+  border: none;
+  border-radius: var(--pm-radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 1px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+
+.pm-hero-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* ===== 快捷操作网格 ===== */
+.pm-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 12px;
+}
+
+.pm-action-card {
+  background: var(--pm-card-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--pm-card-border);
+  border-radius: var(--pm-radius-lg);
+  padding: 18px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: var(--pm-shadow-sm);
+}
+
+.pm-action-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(214, 112, 159, 0.18);
+}
+
+.pm-action-icon {
+  font-size: 32px;
+  margin-bottom: 6px;
+}
+
+.pm-action-card span {
+  font-size: 13px;
+  color: var(--pm-text-main);
+  font-weight: 500;
+}
+
+/* ===== 列表卡片（医院/宠物/预约等） ===== */
+.pm-list-card {
+  background: var(--pm-card-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--pm-card-border);
+  border-radius: var(--pm-radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: var(--pm-shadow-sm);
+}
+
+.pm-list-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(214, 112, 159, 0.18);
+  border-color: rgba(255, 179, 200, 0.6);
+}
+
+.pm-list-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.pm-list-card-icon {
+  font-size: 36px;
+  flex-shrink: 0;
+}
+
+.pm-list-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pm-text-main);
+  margin: 0;
+}
+
+.pm-list-card-subtitle {
+  font-size: 13px;
+  color: var(--pm-text-sub);
+  margin: 2px 0 0;
+}
+
+.pm-list-card-body {
+  font-size: 13px;
+  color: var(--pm-text-sub);
+  line-height: 1.5;
+}
+
+/* ===== 标签 ===== */
+.pm-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.pm-tag-night {
+  background: rgba(102, 126, 234, 0.12);
+  color: #667eea;
+}
+
+.pm-tag-exotic {
+  background: rgba(76, 175, 80, 0.12);
+  color: #4caf50;
+}
+
+.pm-tag-emergency {
+  background: rgba(244, 67, 54, 0.12);
+  color: #f44336;
+}
+
+.pm-tag-nearby {
+  background: rgba(214, 112, 159, 0.12);
+  color: var(--pm-primary);
+  font-weight: 600;
+}
+
+.pm-tag-real {
+  background: rgba(76, 175, 80, 0.12);
+  color: #4caf50;
+}
+
+/* 状态标签 */
+.pm-status-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pm-status-pending {
+  background: rgba(255, 152, 0, 0.12);
+  color: #ff9800;
+}
+
+.pm-status-confirmed {
+  background: rgba(33, 150, 243, 0.12);
+  color: #2196f3;
+}
+
+.pm-status-completed {
+  background: rgba(76, 175, 80, 0.12);
+  color: #4caf50;
+}
+
+.pm-status-cancelled {
+  background: rgba(158, 158, 158, 0.15);
+  color: #9e9e9e;
+}
+
+/* ===== 表单 ===== */
+.pm-form-group {
+  margin-bottom: 14px;
+}
+
+.pm-form-label {
+  display: block;
+  font-size: 13px;
+  color: var(--pm-text-sub);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.pm-input {
+  width: 100%;
+  height: 46px;
+  background: #fff;
+  border: 2px solid var(--pm-border-input);
+  border-radius: var(--pm-radius-md);
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--pm-text-main);
+  outline: none;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+
+.pm-input:focus {
+  border-color: var(--pm-border-input-focus);
+  box-shadow: 0 0 0 4px rgba(255, 179, 200, 0.12);
+}
+
+.pm-input::placeholder {
+  color: var(--pm-text-placeholder);
+}
+
+.pm-textarea {
+  width: 100%;
+  min-height: 80px;
+  background: #fff;
+  border: 2px solid var(--pm-border-input);
+  border-radius: var(--pm-radius-md);
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--pm-text-main);
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+
+.pm-textarea:focus {
+  border-color: var(--pm-border-input-focus);
+  box-shadow: 0 0 0 4px rgba(255, 179, 200, 0.12);
+}
+
+.pm-select {
+  width: 100%;
+  height: 46px;
+  background: #fff;
+  border: 2px solid var(--pm-border-input);
+  border-radius: var(--pm-radius-md);
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--pm-text-main);
+  outline: none;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+
+.pm-select:focus {
+  border-color: var(--pm-border-input-focus);
+}
+
+/* ===== 按钮 ===== */
+.pm-btn {
+  display: inline-block;
+  padding: 11px 24px;
+  background: linear-gradient(135deg, #ff9ec7, #d6709f);
+  border: none;
+  border-radius: var(--pm-radius-md);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.3s;
+  box-shadow: 0 6px 20px rgba(214, 112, 159, 0.3);
+}
+
+.pm-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(214, 112, 159, 0.4);
+}
+
+.pm-btn:active {
+  transform: translateY(0);
+}
+
+.pm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.pm-btn-block {
+  width: 100%;
+  display: block;
+}
+
+.pm-btn-outline {
+  background: rgba(214, 112, 159, 0.08);
+  color: var(--pm-primary);
+  border: 1px solid rgba(214, 112, 159, 0.3);
+  box-shadow: none;
+}
+
+.pm-btn-outline:hover {
+  background: rgba(214, 112, 159, 0.15);
+  box-shadow: 0 4px 12px rgba(214, 112, 159, 0.15);
+}
+
+.pm-btn-sm {
+  padding: 7px 14px;
+  font-size: 12px;
+  border-radius: var(--pm-radius-sm);
+}
+
+/* ===== 底部固定按钮区 ===== */
+.pm-bottom-action {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 14px 20px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 232, 240, 0.6);
+  z-index: 999;
+  display: flex;
+  gap: 10px;
+}
+
+.pm-bottom-action .pm-btn {
+  flex: 1;
+}
+
+/* ===== 底部导航栏 ===== */
+.pm-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 232, 240, 0.6);
+  padding: 10px 0;
+  z-index: 999;
+}
+
+.pm-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--pm-text-sub);
+  font-size: 11px;
+  transition: all 0.2s;
+}
+
+.pm-nav-item:hover {
+  color: var(--pm-primary);
+}
+
+.pm-nav-item.active {
+  color: var(--pm-primary);
+  font-weight: 600;
+}
+
+.pm-nav-icon {
+  font-size: 20px;
+}
+
+/* ===== 空状态 ===== */
+.pm-empty {
+  text-align: center;
+  padding: 36px 20px;
+  color: var(--pm-text-sub);
+}
+
+.pm-empty-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+.pm-empty-text {
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+/* ===== 加载中 ===== */
+.pm-loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--pm-text-sub);
+  font-size: 14px;
+}
+
+/* ===== 模态框 ===== */
+.pm-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(90, 74, 90, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.pm-modal {
+  width: 100%;
+  max-width: 420px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: var(--pm-radius-xl);
+  padding: 24px 22px;
+  box-shadow: 0 20px 60px rgba(214, 112, 159, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+
+.pm-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pm-primary);
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+.pm-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.pm-modal-actions .pm-btn {
+  flex: 1;
+}
+
+/* ===== 单选选项（宠物/医生/日期等） ===== */
+.pm-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: #fff;
+  border-radius: var(--pm-radius-md);
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.3s;
+  margin-bottom: 10px;
+}
+
+.pm-option:hover {
+  background: rgba(214, 112, 159, 0.04);
+}
+
+.pm-option.selected {
+  border-color: var(--pm-primary-light);
+  background: rgba(214, 112, 159, 0.06);
+  box-shadow: 0 2px 10px rgba(214, 112, 159, 0.12);
+}
+
+.pm-option-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.pm-option-content {
+  flex: 1;
+}
+
+.pm-option-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--pm-text-main);
+  display: block;
+}
+
+.pm-option-subtitle {
+  font-size: 13px;
+  color: var(--pm-text-sub);
+  display: block;
+  margin-top: 2px;
+}
+
+/* 单选指示器 */
+.pm-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #ddd;
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.pm-radio.checked {
+  border-color: var(--pm-primary);
+}
+
+.pm-radio.checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pm-primary);
+}
+
+/* ===== 时间槽网格 ===== */
+.pm-time-slots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pm-time-slot {
+  padding: 10px 6px;
+  text-align: center;
+  background: #fff;
+  border: 2px solid var(--pm-border-input);
+  border-radius: var(--pm-radius-sm);
+  font-size: 13px;
+  color: var(--pm-text-main);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pm-time-slot:hover:not(.disabled) {
+  border-color: var(--pm-primary-light);
+}
+
+.pm-time-slot.selected {
+  background: linear-gradient(135deg, #ff9ec7, #d6709f);
+  color: white;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.pm-time-slot.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+/* ===== 评分星级 ===== */
+.pm-rating {
+  color: #ffc107;
+  font-size: 14px;
+}
+
+/* ===== 链接 ===== */
+.pm-link {
+  color: var(--pm-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.pm-link:hover {
+  color: var(--pm-primary-dark);
+}
+
+/* ===== 工具类 ===== */
+.pm-text-center { text-align: center; }
+.pm-text-primary { color: var(--pm-primary); }
+.pm-text-sub { color: var(--pm-text-sub); }
+.pm-mt-8 { margin-top: 8px; }
+.pm-mt-16 { margin-top: 16px; }
+.pm-mb-8 { margin-bottom: 8px; }
+.pm-mb-16 { margin-bottom: 16px; }
+
+/* ===== 响应式 ===== */
+@media (max-width: 480px) {
+  .pm-quick-actions {
+    gap: 8px;
+    margin: 10px;
+  }
+  .pm-action-card {
+    padding: 14px 6px;
+  }
+  .pm-action-icon {
+    font-size: 28px;
+  }
+  .pm-section,
+  .pm-card {
+    margin: 8px 10px;
+    padding: 14px;
+  }
+  .pm-hero {
+    padding: 28px 16px;
+    margin: 10px;
+  }
+  .pm-hero h1 {
+    font-size: 22px;
+  }
+}
