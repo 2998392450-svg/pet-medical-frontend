@@ -81,6 +81,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '../api/axios'
+import { saveMerchantLogin } from '../utils/merchantSession'
 
 const router = useRouter()
 const loginType = ref('password')
@@ -95,7 +96,11 @@ const loginForm = reactive({
   code: ''
 })
 
+// ==================== 登录处理 ====================
+// 支持两种方式：密码登录、验证码登录（演示模式验证码123456）
+// 登录成功后根据role跳转：merchant→商家端，admin→管理员后台，user→首页
 const handleLogin = async () => {
+  // 1. 表单校验
   if (loginType.value === 'password') {
     if (!loginForm.username || !loginForm.password) {
       alert('请输入用户名和密码')
@@ -110,6 +115,7 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
+    // 2. 调用后端登录接口
     let res
     if (loginType.value === 'password') {
       res = await axios.post('/login', {
@@ -119,23 +125,37 @@ const handleLogin = async () => {
     } else {
       res = await axios.post('/login/phone', {
         phone: loginForm.phone,
-        code: loginForm.code || '123456'
+        code: loginForm.code || '123456'  // 演示模式固定验证码
       })
     }
 
+    // 3. 登录成功，按角色分发token并跳转
     if (res && res.code === 200) {
       const role = res.data.user.role
       if (role === 'merchant') {
-        // 商家登录：只设置 merchantToken 和 merchant，不覆盖用户端的 token/user
-        // 避免同一浏览器用户/商家账号串扰
-        localStorage.setItem('merchantToken', res.data.token)
-        localStorage.setItem('merchant', JSON.stringify({
-          id: res.data.user.id,
-          username: res.data.user.username,
-          hospitalName: res.data.user.hospitalName || res.data.user.nickname || '宠物医院',
-          hospitalId: res.data.user.hospitalId,
+        // 商家登录：只写商家自己的会话，不覆盖用户端的 token/user
+        // 会话按标签页隔离（sessionStorage），避免同浏览器另一个窗口登录其他医院时互相顶掉
+        const authUser = res.data.user
+        // 医院范围以 token 为准：响应体缺失 hospitalId 时从 token payload 兜底解析，
+        // 避免商家工作台因拿不到医院 ID 把有效登录态误判为失效而踢回登录页
+        let tokenHospitalId = null
+        try {
+          const seg = String(res.data.token || '').split('.')[1]
+          if (seg) {
+            let b64 = seg.replace(/-/g, '+').replace(/_/g, '/')
+            while (b64.length % 4) b64 += '='
+            tokenHospitalId = JSON.parse(atob(b64)).hospitalId || null
+          }
+        } catch (e) {
+          tokenHospitalId = null
+        }
+        saveMerchantLogin(res.data.token, {
+          id: authUser.id,
+          username: authUser.username,
+          hospitalName: authUser.hospitalName || authUser.hospital_name || authUser.nickname || '宠物医院',
+          hospitalId: authUser.hospitalId || authUser.hospital_id || tokenHospitalId || null,
           role: 'merchant'
-        }))
+        })
         // 同步商家信息到 mockUsers，便于商家端补全离线预约的主人信息
         const onlineUser = res.data.user
         const mockUsers = JSON.parse(localStorage.getItem('mockUsers') || '[]')
@@ -146,9 +166,6 @@ const handleLogin = async () => {
         localStorage.setItem('mockUsers', JSON.stringify(mockUsers))
         router.push('/merchant')
       } else {
-        // 用户/管理员登录：设置 token 和 user
-        localStorage.setItem('token', res.data.token)
-        localStorage.setItem('user', JSON.stringify(res.data.user))
         // 同步在线用户信息到 mockUsers，便于商家端补全离线预约的主人信息
         const onlineUser = res.data.user
         const mockUsers = JSON.parse(localStorage.getItem('mockUsers') || '[]')
@@ -158,8 +175,15 @@ const handleLogin = async () => {
         else mockUsers[idx] = { ...mockUsers[idx], ...userRecord }
         localStorage.setItem('mockUsers', JSON.stringify(mockUsers))
         if (role === 'admin') {
+          // 管理员使用独立凭证；不再删除用户端 token/user，
+          // 否则同一浏览器里用户端下次刷新会被路由守卫判定未登录（管理员登录踢掉用户端）
+          localStorage.setItem('adminToken', res.data.token)
+          localStorage.setItem('adminUser', JSON.stringify(res.data.user))
           router.push('/admin')
         } else {
+          // 普通用户登录：只写用户凭证，不清管理员/商家的独立凭证
+          localStorage.setItem('token', res.data.token)
+          localStorage.setItem('user', JSON.stringify(res.data.user))
           router.push('/')
         }
       }
@@ -167,6 +191,8 @@ const handleLogin = async () => {
       alert(res?.message || '登录失败')
     }
   } catch (error) {
+    // ==================== 离线模式兜底 ====================
+    // 后端不可用时，从localStorage的mockUsers查找账号，保证页面不白屏
     console.error('[登录] 后端不可用，尝试离线登录:', error)
     const users = JSON.parse(localStorage.getItem('mockUsers') || '[]')
 
@@ -178,29 +204,19 @@ const handleLogin = async () => {
           alert('该账号为商家账号，请点击下方"商家入口"登录')
           return
         }
-        localStorage.setItem('token', 'mock-token-' + user.id)
-        localStorage.setItem('user', JSON.stringify({
-          id: user.id,
-          username: user.username,
-          nickname: user.nickname || user.username,
-          phone: user.phone,
-          email: user.email,
-          avatar: user.avatar,
-          role: user.role || 'user'
-        }))
         if (user.role === 'admin') {
+          // 离线管理员同样使用独立凭证
+          localStorage.setItem('adminToken', 'mock-token-' + user.id)
+          localStorage.setItem('adminUser', JSON.stringify({
+            id: user.id,
+            username: user.username,
+            nickname: user.nickname || user.username,
+            phone: user.phone,
+            email: user.email,
+            avatar: user.avatar,
+            role: 'admin'
+          }))
           router.push('/admin')
-        } else {
-          router.push('/')
-        }
-      } else {
-        alert('账号或密码错误（离线模式）')
-      }
-    } else {
-      const user = users.find(u => u.phone === loginForm.phone)
-      if (user) {
-        if (user.role === 'merchant') {
-          alert('该账号为商家账号，请点击下方"商家入口"登录')
           return
         }
         localStorage.setItem('token', 'mock-token-' + user.id)
@@ -213,11 +229,43 @@ const handleLogin = async () => {
           avatar: user.avatar,
           role: user.role || 'user'
         }))
-        if (user.role === 'admin') {
-          router.push('/admin')
-        } else {
-          router.push('/')
+        router.push('/')
+      } else {
+        alert('账号或密码错误（离线模式）')
+      }
+    } else {
+      const user = users.find(u => u.phone === loginForm.phone)
+      if (user) {
+        if (user.role === 'merchant') {
+          alert('该账号为商家账号，请点击下方"商家入口"登录')
+          return
         }
+        if (user.role === 'admin') {
+          // 离线管理员同样使用独立凭证
+          localStorage.setItem('adminToken', 'mock-token-' + user.id)
+          localStorage.setItem('adminUser', JSON.stringify({
+            id: user.id,
+            username: user.username,
+            nickname: user.nickname || user.username,
+            phone: user.phone,
+            email: user.email,
+            avatar: user.avatar,
+            role: 'admin'
+          }))
+          router.push('/admin')
+          return
+        }
+        localStorage.setItem('token', 'mock-token-' + user.id)
+        localStorage.setItem('user', JSON.stringify({
+          id: user.id,
+          username: user.username,
+          nickname: user.nickname || user.username,
+          phone: user.phone,
+          email: user.email,
+          avatar: user.avatar,
+          role: user.role || 'user'
+        }))
+        router.push('/')
       } else {
         alert('该手机号未注册（离线模式）')
       }

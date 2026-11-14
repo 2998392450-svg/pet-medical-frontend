@@ -27,6 +27,7 @@
 
       <!-- ===== 平台概览 ===== -->
       <div v-if="activeModule === 'overview'" class="overview-panel">
+        <div v-if="overviewError" class="overview-error">⚠️ {{ overviewError }}（可再次点击「平台概览」重试）</div>
         <!-- 核心数据卡片 -->
         <div class="stats-grid">
           <div class="stat-card today">
@@ -250,8 +251,9 @@ import axios from '@/api/axios'
 import * as echarts from 'echarts'
 
 const router = useRouter()
-const admin = JSON.parse(localStorage.getItem('user') || '{}')
-const token = localStorage.getItem('token')
+const admin = JSON.parse(localStorage.getItem('adminUser') || '{}')
+// 动态读取管理员 token：避免模块被缓存后拿到登录前的旧值
+const getAdminToken = () => localStorage.getItem('adminToken') || ''
 
 const activeModule = ref('overview')
 const loading = ref(false)
@@ -285,12 +287,17 @@ const appointments = ref([])
 const appointmentLoading = ref(false)
 const appointmentFilter = reactive({ status: '', hospitalId: '' })
 const hospitals = ref([])
+// 概览数据加载失败时的可见提示（避免切回概览只看到空白）
+const overviewError = ref('')
 
 const filteredApps = computed(() => {
   return applications.value.filter(a => a.status === currentTab.value)
 })
 
-const getAuthHeaders = () => ({ Authorization: 'Bearer ' + token })
+const getAuthHeaders = () => {
+  const token = getAdminToken()
+  return token ? { Authorization: 'Bearer ' + token } : {}
+}
 
 const statusText = (s) => {
   return { pending: '待审核', approved: '已通过', rejected: '已拒绝' }[s] || s
@@ -317,7 +324,19 @@ const formatDateTime = (date, slot) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${slot || ''}`
 }
 
+// 概览模块用 v-if 切换：切走时图表 DOM 会被卸载，必须同步销毁 ECharts 实例，
+// 否则切回时实例仍绑定在已移除的节点上，接口成功但图表空白
+const disposeCharts = () => {
+  if (trendChart) { trendChart.dispose(); trendChart = null }
+  if (ratioChart) { ratioChart.dispose(); ratioChart = null }
+}
+
 const switchModule = (module) => {
+  if (module !== 'overview') {
+    disposeCharts()
+  } else {
+    overviewError.value = ''
+  }
   activeModule.value = module
   if (module === 'overview') {
     loadStats()
@@ -332,6 +351,9 @@ const switchModule = (module) => {
   }
 }
 
+// ==================== 加载平台统计数据 ====================
+// GET /api/merchant/stats  返回医院数/预约数/用户数等汇总指标
+// 401 时自动跳登录页
 const loadStats = async () => {
   try {
     const res = await axios.get('/merchant/stats', { headers: getAuthHeaders() })
@@ -341,10 +363,15 @@ const loadStats = async () => {
     if (error.response && error.response.status === 401) {
       alert('登录已过期，请重新登录')
       router.push('/login')
+    } else {
+      overviewError.value = '概览统计数据加载失败'
     }
   }
 }
 
+// ==================== 加载商家入驻申请列表 ====================
+// GET /api/merchant/applications  需带管理员 token
+// 返回的申请含医院名、营业执照图片、联系方式等
 const loadApplications = async () => {
   loading.value = true
   try {
@@ -358,10 +385,14 @@ const loadApplications = async () => {
   }
 }
 
+// 切换"待审核/已通过/已拒绝"标签
 const switchTab = (tab) => {
   currentTab.value = tab
 }
 
+// ==================== 通过商家入驻申请 ====================
+// PUT /api/merchant/applications/:id/approve
+// 通过后系统自动创建商家账号并关联医院记录
 const approve = async (app) => {
   if (!confirm(`确认通过「${app.hospitalName}」的入驻申请？\n${app.autoMatched ? '该申请已自动认证匹配到现有医院。' : '将通过此申请并新建医院记录。'}`)) return
   processing.value = app.id
@@ -384,6 +415,9 @@ const reject = (app) => {
   showRejectModal.value = true
 }
 
+// ==================== 拒绝商家入驻申请 ====================
+// PUT /api/merchant/applications/:id/reject  body: { reason }
+// 必须填写拒绝理由，会展示给商家
 const confirmReject = async () => {
   const app = currentRejectApp.value
   if (!app || !rejectReason.value) return
@@ -407,12 +441,15 @@ const previewImage = (url) => {
 }
 
 const logout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  localStorage.removeItem('adminToken')
+  localStorage.removeItem('adminUser')
   router.push('/login')
 }
 
-// ===== 平台概览 - 图表 =====
+// ==================== 平台概览 - 数据看板图表 ====================
+// 使用 ECharts 渲染两类图表：
+// 1. 预约趋势折线图（近7/30天每日预约量）
+// 2. 各医院预约占比饼图
 const loadTrend = async (days) => {
   trendDays.value = days
   try {
@@ -421,6 +458,7 @@ const loadTrend = async (days) => {
     renderTrendChart(data)
   } catch (error) {
     console.error('loadTrend error:', error)
+    overviewError.value = '预约趋势数据加载失败'
   }
 }
 
@@ -431,12 +469,18 @@ const loadRatio = async () => {
     renderRatioChart(data)
   } catch (error) {
     console.error('loadRatio error:', error)
+    overviewError.value = '医院预约量数据加载失败'
   }
 }
 
 const renderTrendChart = (data) => {
   nextTick(() => {
     if (!trendChartRef.value) return
+    // 实例可能仍绑定在切换前的旧 DOM 上，绑定节点不一致时重建
+    if (trendChart && trendChart.getDom() !== trendChartRef.value) {
+      trendChart.dispose()
+      trendChart = null
+    }
     if (!trendChart) {
       trendChart = echarts.init(trendChartRef.value)
     }
@@ -476,6 +520,11 @@ const renderTrendChart = (data) => {
 const renderRatioChart = (data) => {
   nextTick(() => {
     if (!ratioChartRef.value) return
+    // 实例可能仍绑定在切换前的旧 DOM 上，绑定节点不一致时重建
+    if (ratioChart && ratioChart.getDom() !== ratioChartRef.value) {
+      ratioChart.dispose()
+      ratioChart = null
+    }
     if (!ratioChart) {
       ratioChart = echarts.init(ratioChartRef.value)
     }
@@ -556,7 +605,8 @@ const handleResize = () => {
   ratioChart && ratioChart.resize()
 }
 
-// ===== 预约监管 =====
+// ==================== 预约监管模块 ====================
+// 管理员可查看全平台预约，强制完成/取消异常订单
 const loadHospitals = async () => {
   try {
     const res = await axios.get('/hospitals')
@@ -567,6 +617,8 @@ const loadHospitals = async () => {
   }
 }
 
+// 加载全平台预约（支持按状态/医院筛选）
+// GET /api/appointments/admin?status=&hospitalId=
 const loadAppointments = async () => {
   appointmentLoading.value = true
   try {
@@ -585,6 +637,9 @@ const loadAppointments = async () => {
   }
 }
 
+// ==================== 强制完成预约 ====================
+// PUT /api/appointments/admin/:id/force-complete
+// 用于商家长期未点完成时管理员介入
 const forceComplete = async (appt) => {
   if (!confirm(`确认将「${appt.hospitalName}」的预约标记为已完成？`)) return
   try {
@@ -598,6 +653,9 @@ const forceComplete = async (appt) => {
   }
 }
 
+// ==================== 强制取消预约 ====================
+// PUT /api/appointments/admin/:id/force-cancel
+// 异常订单/客诉时管理员介入取消
 const forceCancel = async (appt) => {
   if (!confirm(`确认强制取消「${appt.hospitalName}」的预约？`)) return
   try {
@@ -612,7 +670,8 @@ const forceCancel = async (appt) => {
 }
 
 onMounted(() => {
-  if (!token || admin.role !== 'admin') {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}')
+  if (!getAdminToken() || adminUser.role !== 'admin') {
     alert('请使用管理员账号登录')
     router.push('/login')
     return
@@ -691,6 +750,17 @@ onUnmounted(() => {
   padding: 0 24px;
   max-width: 1400px;
   margin: 0 auto;
+}
+
+/* 概览数据加载失败提示：避免只看到空白 */
+.overview-error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #fff4f4;
+  border: 1px solid #ffd0d0;
+  border-radius: 12px;
+  color: #d9534f;
+  font-size: 13px;
 }
 
 .stats-grid {

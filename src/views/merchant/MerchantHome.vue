@@ -11,6 +11,9 @@
         </div>
       </nav>
 
+      <!-- 数据隔离提示：后端拒绝跨院请求时明确提示，不再静默展示本地缓存 -->
+      <div v-if="accessNotice" class="isolation-notice">{{ accessNotice }}</div>
+
       <!-- Tab 切换 -->
       <div class="tab-bar">
         <span
@@ -61,6 +64,10 @@
                 <span class="info-value">{{ appt.petName }}</span>
               </div>
               <div class="appt-info">
+                <span class="info-label">宠物码</span>
+                <span class="info-value pet-code">{{ appt.petUuid || '暂无宠物码' }}</span>
+              </div>
+              <div class="appt-info">
                 <span class="info-label">主人</span>
                 <span class="info-value">{{ appt.userNickname || appt.userName || '匿名' }}</span>
               </div>
@@ -82,15 +89,18 @@
               </div>
             </div>
             <div class="appt-actions" v-if="appt.status === 'pending'">
+              <button class="action-btn records" @click="openPetRecords(appt)">查看病历</button>
               <button class="action-btn confirm" @click="confirmAppointment(appt)">确认预约</button>
               <button class="action-btn reject" @click="rejectAppointment(appt)">拒绝</button>
               <button class="action-btn chat" @click="openChat(appt)">沟通</button>
             </div>
             <div class="appt-actions" v-else-if="appt.status === 'confirmed'">
-              <button class="action-btn complete" @click="completeAppointment(appt)">完成就诊</button>
+              <button class="action-btn records" @click="openPetRecords(appt)">查看病历</button>
+              <button class="action-btn complete" @click="openCompleteDialog(appt)">完成就诊</button>
               <button class="action-btn chat" @click="openChat(appt)">沟通</button>
             </div>
             <div class="appt-actions" v-else>
+              <button class="action-btn records" @click="openPetRecords(appt)">查看病历</button>
               <button class="action-btn chat" @click="openChat(appt)">沟通</button>
             </div>
           </div>
@@ -215,6 +225,16 @@
         </div>
       </div>
 
+      <!-- 病历管理 -->
+      <div v-else-if="activeTab === 'records'" class="tab-content records-tab">
+        <div class="records-actions">
+          <button class="pm-btn" @click="showRecordDialog = true">+ 开具病历</button>
+          <span class="records-hint">提交后自动关联本医院，无需填写医院编号</span>
+        </div>
+        <MerchantCrossHospitalRecords />
+        <MedicalRecordImport class="records-import" />
+      </div>
+
       <!-- 医生添加/编辑弹窗 -->
       <div v-if="showDoctorModal" class="pm-modal-mask" @click.self="showDoctorModal = false">
         <div class="pm-modal doctor-modal">
@@ -262,6 +282,48 @@
           </div>
         </div>
       </div>
+
+      <!-- 完成就诊弹窗：可选填写诊断/治疗方案，不填走后端默认描述 -->
+      <div v-if="showCompleteModal" class="pm-modal-mask" @click.self="closeCompleteDialog">
+        <div class="pm-modal complete-modal">
+          <div class="pm-modal-title">完成就诊</div>
+          <p class="complete-hint">为「{{ completeTarget?.petName || '该宠物' }}」记录本次就诊</p>
+          <p class="complete-pet-code">宠物码：{{ completeTarget?.petUuid || '暂无宠物码' }}</p>
+          <div class="modal-form">
+            <div class="modal-field">
+              <label class="modal-field-label">诊断结果</label>
+              <textarea
+                v-model="completeForm.diagnosis"
+                rows="3"
+                class="pm-textarea"
+                placeholder="如：急性肠胃炎（选填）"
+                :disabled="completing"
+              ></textarea>
+            </div>
+            <div class="modal-field">
+              <label class="modal-field-label">治疗方案</label>
+              <textarea
+                v-model="completeForm.treatment"
+                rows="3"
+                class="pm-textarea"
+                placeholder="如：止吐补液，3 天后复诊（选填）"
+                :disabled="completing"
+              ></textarea>
+            </div>
+            <p class="complete-tip">不填将记录为常规门诊描述</p>
+          </div>
+          <div class="pm-modal-actions">
+            <button class="pm-btn pm-btn-outline" :disabled="completing" @click="closeCompleteDialog">取消</button>
+            <button class="pm-btn" :disabled="completing" @click="confirmComplete">
+              {{ completing ? '提交中...' : '确认完成' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 开具病历弹窗 -->
+      <MedicalRecordDialog v-model="showRecordDialog" @success="handleRecordCreated" />
+      <PetMedicalRecordDrawer v-model="showPetRecords" :pet="recordPet" />
     </div>
   </div>
 </template>
@@ -270,14 +332,36 @@
 import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '@/api/axios'
+import { formatDateOnly } from '@/utils/date'
+import {
+  getMerchantSession,
+  getMerchantToken,
+  updateMerchantProfile,
+  clearMerchantSession,
+  parseTokenPayload
+} from '@/utils/merchantSession'
+import MedicalRecordDialog from '@/components/merchant/MedicalRecordDialog.vue'
+import PetMedicalRecordDrawer from '@/components/merchant/PetMedicalRecordDrawer.vue'
+import MerchantCrossHospitalRecords from '@/components/merchant/MerchantCrossHospitalRecords.vue'
+import MedicalRecordImport from '@/components/merchant/MedicalRecordImport.vue'
 
 const router = useRouter()
 const merchant = ref(null)
 const activeTab = ref('appointments')
+const showRecordDialog = ref(false)
+// 预约卡片「查看病历」只读抽屉
+const showPetRecords = ref(false)
+const recordPet = ref({})
 const appointmentStatus = ref('all')
 const sessions = ref([])
 const currentSession = ref(null)
 const messageInput = ref('')
+
+// 完成就诊弹窗：可选填写诊断/治疗方案，提交时一并带给完成接口
+const showCompleteModal = ref(false)
+const completeTarget = ref(null)
+const completing = ref(false)
+const completeForm = reactive({ diagnosis: '', treatment: '' })
 
 // 医生管理
 const doctors = ref([])
@@ -296,9 +380,14 @@ const doctorForm = reactive({
 const tabs = [
   { key: 'appointments', label: '预约管理', icon: '📋' },
   { key: 'doctors', label: '医生管理', icon: '👨‍⚕️' },
+  { key: 'records', label: '病历管理', icon: '🗂️' },
   { key: 'chat', label: '在线沟通', icon: '💬' },
   { key: 'stats', label: '数据统计', icon: '📊' }
 ]
+
+const handleRecordCreated = (data) => {
+  alert(data && data.duplicated ? '同一份病历已存在，未重复写入' : '病历提交成功')
+}
 
 const statusFilters = [
   { value: 'all', label: '全部' },
@@ -308,35 +397,60 @@ const statusFilters = [
   { value: 'cancelled', label: '已取消' }
 ]
 
-// 加载所有预约（调用后端 API，失败时 localStorage 兜底，同时合并离线预约）
+// ==================== 加载本医院所有预约 ====================
+// GET /api/appointments/merchant?hospitalId=
+// 流程：1.读本地离线预约 → 2.调后端接口（带 merchantToken）→ 3.合并去重 → 4.补全主人信息
+// 离线模式：无 hospitalId 或无 token 时只显示本地数据
 const allAppointments = ref([])
+// 隔离异常提示（后端 403 等），避免把别的医院缓存当成正常数据渲染
+const accessNotice = ref('')
+
+// 商家身份只从本标签页会话中的 token 推导（只解析不验签，服务端范围校验仍由后端完成）
+function currentHospitalId() {
+  return String(merchant.value?.hospitalId || '')
+}
+
+// 兜底隔离：渲染前再拦一次，非本院记录一律丢弃（防守层，不替代服务端 token 限定）
+function sanitizeAppointments(list) {
+  const hid = currentHospitalId()
+  const hname = merchant.value?.hospitalName || ''
+  const kept = []
+  let dropped = 0
+  list.forEach(a => {
+    const aHid = String(a.hospitalId || a.hospital_id || '')
+    if (aHid) {
+      if (hid && aHid === hid) kept.push(a)
+      else dropped += 1
+      return
+    }
+    // 老数据没有 hospitalId：必须医院名完全一致才保留
+    if (hname && a.hospitalName === hname) kept.push(a)
+    else dropped += 1
+  })
+  if (dropped > 0) console.warn('[MerchantHome] 已拦截', dropped, '条非本院预约数据')
+  return kept
+}
 
 const loadAppointments = async () => {
   const hospitalId = merchant.value?.hospitalId
   const merchantHospitalName = merchant.value?.hospitalName || ''
   console.log('[MerchantHome] loadAppointments 开始, hospitalId=', hospitalId, 'hospitalName=', merchantHospitalName)
+  accessNotice.value = ''
 
-  // 1. 先从 localStorage 读取本医院离线预约（nearby_/mock-token 场景）
+  // 1. 先从 localStorage 读取本院离线预约：只认 hospitalId，不再按医院名模糊匹配
   const localAppointments = JSON.parse(localStorage.getItem('mockAppointments') || '[]')
   // 读取本地用户表，用于补全离线预约的主人名字和电话
   const mockUsers = JSON.parse(localStorage.getItem('mockUsers') || '[]')
   const myLocalAppointments = localAppointments.filter(a => {
     const aHid = String(a.hospitalId || a.hospital_id || '')
-    const aHname = a.hospitalName || ''
-    // hospitalId 精确匹配
-    if (aHid && hospitalId && aHid === String(hospitalId)) return true
-    // 医院名模糊匹配（处理 nearby_ 医院名称差异）
-    if (merchantHospitalName && aHname) {
-      const n1 = normalizeName(aHname)
-      const n2 = normalizeName(merchantHospitalName)
-      if (n1 && n2 && (n1 === n2 || n1.includes(n2) || n2.includes(n1))) return true
-    }
-    return false
+    if (aHid) return !!hospitalId && aHid === String(hospitalId)
+    // 无 hospitalId 的老数据：要求医院名完全一致（不做包含/核心名匹配）
+    return !!merchantHospitalName && a.hospitalName === merchantHospitalName
   }).map(a => {
     // 补全主人名字和电话：优先用 mockUsers 里的最新数据
     const localUser = mockUsers.find(u => String(u.id) === String(a.userId))
     // 统一时间字段：后端用 appointmentDate + timeSlot，离线用 appointmentTime
-    const dateStr = a.appointmentDate ? String(a.appointmentDate).slice(0, 10) : ''
+    const dateStr = formatDateOnly(a.appointmentDate)
     const timeStr = a.timeSlot || ''
     const appointmentTime = a.appointmentTime || (dateStr && timeStr ? `${dateStr} ${timeStr}`.trim() : dateStr || timeStr)
     // 统一就诊类型字段：后端用 reason，离线用 type
@@ -353,52 +467,61 @@ const loadAppointments = async () => {
   })
 
   if (!hospitalId) {
-    // 纯离线模式：无 hospitalId，按医院名过滤本地数据
-    allAppointments.value = myLocalAppointments
+    // 纯离线模式：无 hospitalId，仅保留医院名完全一致的本地数据
+    allAppointments.value = sanitizeAppointments(myLocalAppointments)
     console.log('[MerchantHome] 无 hospitalId，仅显示离线预约=', allAppointments.value.length)
     await supplementUserInfo()
     return
   }
   try {
-    const token = localStorage.getItem('merchantToken')
+    const token = getMerchantToken()
     if (!token) {
       console.warn('[MerchantHome] merchantToken 不存在，使用离线数据')
-      allAppointments.value = myLocalAppointments
+      allAppointments.value = sanitizeAppointments(myLocalAppointments)
       return
     }
-    console.log('[MerchantHome] 调用后端 /appointments/merchant?hospitalId=', hospitalId, 'token存在=', !!token)
+    // 医院范围只由服务端 token 推导，前端不再携带 hospitalId
+    console.log('[MerchantHome] 调用后端 /appointments/merchant（范围由 token 决定）')
     const res = await axios.get('/appointments/merchant', {
-      params: { hospitalId },
       headers: { Authorization: 'Bearer ' + token }
     })
     console.log('[MerchantHome] 后端返回 code=', res.code, '预约数=', res.data?.length || 0)
     if (res.code === 200) {
       // 后端预约统一字段：生成 appointmentTime 和 type
       const backendAppointments = (res.data || []).map(a => {
-        const dateStr = a.appointmentDate ? String(a.appointmentDate).slice(0, 10) : ''
+        const dateStr = formatDateOnly(a.appointmentDate)
         const timeStr = a.timeSlot || ''
         const appointmentTime = a.appointmentTime || (dateStr && timeStr ? `${dateStr} ${timeStr}`.trim() : dateStr || timeStr)
         const type = a.type || a.reason || null
         return { ...a, appointmentTime, type }
       })
-      // 合并后端预约与本地离线预约（后端优先，离线作补充）
+      // 合并后端预约与本地离线预约（后端优先，离线作补充），最后统一过隔离兜底
       const backendIds = new Set(backendAppointments.map(a => String(a.id)))
       const extraLocal = myLocalAppointments.filter(a => !backendIds.has(String(a.id)))
-      allAppointments.value = [...backendAppointments, ...extraLocal]
+      allAppointments.value = sanitizeAppointments([...backendAppointments, ...extraLocal])
       console.log('[MerchantHome] 合并后总预约数=', allAppointments.value.length)
       // 对仍缺少主人信息的离线预约，从后端 /user/:id 补全
       await supplementUserInfo()
     } else {
-      // 非 200 业务码也走离线兜底，避免页面空白
-      allAppointments.value = myLocalAppointments
+      allAppointments.value = sanitizeAppointments(myLocalAppointments)
     }
   } catch (error) {
+    const status = error?.response?.status
+    if (status === 403) {
+      // 凭证与商家身份不一致：不再把本地缓存当成本院数据渲染
+      console.warn('[MerchantHome] 后端拒绝访问本院预约（403），清空列表')
+      allAppointments.value = []
+      accessNotice.value = '当前登录凭证与商家所属医院不一致，已停止展示预约数据，请重新登录后再试'
+      return
+    }
     console.error('[MerchantHome] 加载预约失败，使用离线数据:', error)
-    allAppointments.value = myLocalAppointments
+    allAppointments.value = sanitizeAppointments(myLocalAppointments)
   }
 }
 
-// 补全离线预约的主人信息：mockUsers 找不到时尝试后端 /user/:id
+// ==================== 补全离线预约的主人信息 ====================
+// 本地 mockUsers 找不到时尝试后端 GET /api/user/:id 补全主人姓名/电话
+// 商家端必须显式带 merchantToken，避免被 axios 拦截器注入用户端 token
 const supplementUserInfo = async () => {
   const needSupplement = allAppointments.value.filter(a => {
     const hasName = a.userNickname || a.userName
@@ -413,7 +536,7 @@ const supplementUserInfo = async () => {
     .filter(id => !isNaN(id) && id > 0 && id < 100000)
   )]
   // 商家端请求必须显式带 merchantToken，避免被 axios 拦截器注入用户端 token
-  const token = localStorage.getItem('merchantToken')
+  const token = getMerchantToken()
   if (!token) return
   for (const uid of dbUserIds) {
     try {
@@ -504,7 +627,10 @@ const updateOfflineAppointmentStatus = (appt, newStatus) => {
   return false
 }
 
-// 确认预约
+// ==================== 确认预约 ====================
+// PUT /api/appointments/:id/status  status=confirm
+// 流程：1.离线预约直接改 localStorage → 2.在线预约调后端 → 3.失败降级到 localStorage
+// 确认后通过聊天系统消息通知宠主
 const confirmAppointment = async (appt) => {
   // 离线预约（nearby_/时间戳 id）直接走 localStorage，不调后端
   if (isOfflineAppointment(appt)) {
@@ -519,7 +645,7 @@ const confirmAppointment = async (appt) => {
     return
   }
   try {
-    const token = localStorage.getItem('merchantToken')
+    const token = getMerchantToken()
     await axios.put(`/appointments/${appt.id}/status`, { status: 'confirm' }, { headers: { Authorization: 'Bearer ' + token } })
     addSystemMessage(appt, '您的预约已确认！请按时到院就诊。')
     alert('已确认预约')
@@ -535,7 +661,9 @@ const confirmAppointment = async (appt) => {
   }
 }
 
-// 拒绝预约
+// ==================== 拒绝预约 ====================
+// PUT /api/appointments/:id/status  status=cancel
+// 离线预约直接改 localStorage，在线预约调后端，失败降级
 const rejectAppointment = async (appt) => {
   if (!confirm('确定拒绝此预约吗？')) return
   // 离线预约直接走 localStorage
@@ -549,7 +677,7 @@ const rejectAppointment = async (appt) => {
     return
   }
   try {
-    const token = localStorage.getItem('merchantToken')
+    const token = getMerchantToken()
     await axios.put(`/appointments/${appt.id}/status`, { status: 'cancel' }, { headers: { Authorization: 'Bearer ' + token } })
     addSystemMessage(appt, '很抱歉，您的预约未能通过，详情请咨询。')
     alert('已拒绝预约')
@@ -565,38 +693,94 @@ const rejectAppointment = async (appt) => {
   }
 }
 
-// 完成就诊
-const completeAppointment = async (appt) => {
-  // 离线预约直接走 localStorage
-  if (isOfflineAppointment(appt)) {
-    const ok = updateOfflineAppointmentStatus(appt, 'completed')
-    if (ok) {
-      addSystemMessage(appt, '就诊已完成，祝您的宠物健康！期待您的评价。')
-      alert('已标记完成（离线预约）')
-      await loadAppointments()
-    }
+// ==================== 查看病历档案 ====================
+// 无 pet_uuid 时不发请求，直接提示
+const openPetRecords = (appt) => {
+  if (!appt.petUuid) {
+    alert('该宠物暂无宠物码，无法调阅病历档案')
     return
   }
+  recordPet.value = { name: appt.petName, petUuid: appt.petUuid }
+  showPetRecords.value = true
+}
+
+// ==================== 完成就诊 ====================
+// PUT /api/appointments/:id/status  status=complete
+// 弹窗可选填写诊断/治疗方案，一并提交；不填则由后端写入常规门诊默认描述
+
+// 打开弹窗：每次重置填写内容
+const openCompleteDialog = (appt) => {
+  completeTarget.value = appt
+  completeForm.diagnosis = ''
+  completeForm.treatment = ''
+  showCompleteModal.value = true
+}
+
+// 取消弹窗：不做任何提交，预约状态保持不变
+const closeCompleteDialog = () => {
+  if (completing.value) return
+  showCompleteModal.value = false
+  completeTarget.value = null
+}
+
+const confirmComplete = async () => {
+  // 防连点：提交中直接忽略再次点击
+  if (completing.value || !completeTarget.value) return
+  const appt = completeTarget.value
+  completing.value = true
+
+  const payload = { status: 'complete' }
+  if (completeForm.diagnosis.trim()) payload.diagnosis = completeForm.diagnosis.trim()
+  if (completeForm.treatment.trim()) payload.treatment = completeForm.treatment.trim()
+
   try {
-    const token = localStorage.getItem('merchantToken')
-    await axios.put(`/appointments/${appt.id}/status`, { status: 'complete' }, { headers: { Authorization: 'Bearer ' + token } })
-    addSystemMessage(appt, '就诊已完成，祝您的宠物健康！期待您的评价。')
-    alert('已标记完成')
-    await loadAppointments()
-  } catch (error) {
-    console.error('[MerchantHome] 完成失败，使用离线模式:', error)
-    const ok = updateOfflineAppointmentStatus(appt, 'completed')
-    if (ok) {
+    // 离线预约直接走 localStorage
+    if (isOfflineAppointment(appt)) {
+      const ok = updateOfflineAppointmentStatus(appt, 'completed')
+      if (!ok) {
+        alert('完成失败：未找到该预约')
+        return
+      }
       addSystemMessage(appt, '就诊已完成，祝您的宠物健康！期待您的评价。')
-      alert('已标记完成（离线模式）')
+      showCompleteModal.value = false
+      completeTarget.value = null
+      alert('已标记完成（离线预约）')
       await loadAppointments()
+      return
     }
+
+    try {
+      const token = getMerchantToken()
+      await axios.put(`/appointments/${appt.id}/status`, payload, { headers: { Authorization: 'Bearer ' + token } })
+      addSystemMessage(appt, '就诊已完成，祝您的宠物健康！期待您的评价。')
+      showCompleteModal.value = false
+      completeTarget.value = null
+      alert('已标记完成')
+      await loadAppointments()
+    } catch (error) {
+      console.error('[MerchantHome] 完成失败，使用离线模式:', error)
+      const ok = updateOfflineAppointmentStatus(appt, 'completed')
+      if (ok) {
+        addSystemMessage(appt, '就诊已完成，祝您的宠物健康！期待您的评价。')
+        showCompleteModal.value = false
+        completeTarget.value = null
+        alert('已标记完成（离线模式）')
+        await loadAppointments()
+      }
+    }
+  } finally {
+    completing.value = false
   }
 }
 
-// ===== 医生管理 =====
+// ==================== 医生管理 ====================
+// GET /api/merchant/doctors  获取本院医生列表
+// POST /api/merchant/doctors  新增医生
+// PUT /api/merchant/doctors/:id  修改医生
+// DELETE /api/merchant/doctors/:id  删除医生
+// 所有接口都需在 Header 带 merchantToken 鉴权
 const loadDoctors = async () => {
-  const token = localStorage.getItem('merchantToken')
+  const token = getMerchantToken()
   if (!token) return
   try {
     const res = await axios.get('/merchant/doctors', { headers: { Authorization: 'Bearer ' + token } })
@@ -633,7 +817,7 @@ const openDoctorModal = (doc = null) => {
 const saveDoctor = async () => {
   if (!doctorForm.name || !doctorForm.specialty) return
   saving.value = true
-  const token = localStorage.getItem('merchantToken')
+  const token = getMerchantToken()
   try {
     if (doctorForm.id) {
       await axios.put(`/merchant/doctors/${doctorForm.id}`, doctorForm, { headers: { Authorization: 'Bearer ' + token } })
@@ -655,7 +839,7 @@ const saveDoctor = async () => {
 
 const deleteDoctor = async (doc) => {
   if (!confirm(`确定删除医生「${doc.name}」？`)) return
-  const token = localStorage.getItem('merchantToken')
+  const token = getMerchantToken()
   try {
     await axios.delete(`/merchant/doctors/${doc.id}`, { headers: { Authorization: 'Bearer ' + token } })
     alert('删除成功')
@@ -667,38 +851,17 @@ const deleteDoctor = async (doc) => {
   }
 }
 
-// 在线沟通（跨 hospitalId key 匹配：real ID + nearby_ 医院通过名称匹配）
+// 在线沟通（严格按 hospitalId 隔离：仅当前医院 key 下的本院会话可见）
 // 数据结构：merchantChats[hospitalIdKey][userId] = { userId, appointmentId, userName, petName, hospitalName, hospitalId, messages: [...] }
 
 const unreadCount = computed(() => sessions.value.reduce((sum, s) => sum + (s.unread || 0), 0))
 
-// 医院名标准化：去掉空格、括号差异、· 后缀分店/专科描述，提取核心名
-const normalizeName = (name) => {
-  if (!name) return ''
-  let s = String(name)
-    .replace(/\s+/g, '')
-    .replace(/[（(].*?[)）]/g, '')
-    .replace(/·.*$/, '')
-    .toLowerCase()
-  return s
-}
-
-// 判断一个 session 是否属于当前商家（通过 hospitalId 精确匹配 或 hospitalName 模糊匹配）
+// 判断一个 session 是否属于当前商家：只认 hospitalId；旧数据没有 hospitalId 时才允许医院名完全一致
 const isSessionForThisMerchant = (session, hid, merchantName) => {
-  // 精确匹配 hospitalId
-  if (session.hospitalId && String(session.hospitalId) === hid) return true
-  // 名称模糊匹配（处理 nearby_ 医院的情况）
-  const sName = normalizeName(session.hospitalName)
-  const mName = normalizeName(merchantName)
-  if (sName && mName) {
-    if (sName === mName) return true
-    if (sName.includes(mName) || mName.includes(sName)) return true
-    // 进一步：核心名（去掉"宠物医院"后缀）匹配
-    const sCore = sName.replace(/宠物医院|动物医院|宠物诊所|动物诊所/g, '')
-    const mCore = mName.replace(/宠物医院|动物医院|宠物诊所|动物诊所/g, '')
-    if (sCore && mCore && (sCore === mCore || sCore.includes(mCore) || mCore.includes(sCore))) return true
-  }
-  return false
+  const sHid = String(session.hospitalId || '')
+  if (sHid) return !!hid && sHid === hid
+  if (!session.hospitalName || !merchantName) return false
+  return session.hospitalName === merchantName
 }
 
 // 跨所有 key 查找某个 userId 的会话（合并所有来源 key 的消息）
@@ -742,30 +905,29 @@ const readSession = (userId) => {
   return merged
 }
 
-// 写入会话：写到商家自身 key + 所有原始来源 key，确保用户端能看到回复
+// 写入会话：只写当前商家所属医院的 key，避免把消息落到别的医院空间
 const writeSession = (userId, session) => {
   const hid = String(merchant.value?.hospitalId || '')
+  if (!hid) return
+  // 会话本身属于别的医院时不落盘（正常流程不会出现，出现说明数据已串，直接丢弃）
+  const sHid = String(session.hospitalId || '')
+  if (sHid && sHid !== hid) {
+    console.warn('[MerchantHome] 丢弃非本院会话写入, session.hospitalId=', sHid)
+    return
+  }
   const data = JSON.parse(localStorage.getItem('merchantChats') || '{}')
   const cleanSession = JSON.parse(JSON.stringify(session))
   delete cleanSession._sourceKeys
-  const uid = String(userId)
-  
-  // 要写入的 key 列表：商家自身的 hospitalId key + session 记录的来源 key
-  const targetKeys = new Set([hid])
-  if (session._sourceKeys && Array.isArray(session._sourceKeys)) {
-    session._sourceKeys.forEach(k => targetKeys.add(k))
-  }
-  if (session.hospitalId) targetKeys.add(String(session.hospitalId))
-  
-  for (const key of targetKeys) {
-    if (!key) continue
-    if (!data[key]) data[key] = {}
-    data[key][uid] = JSON.parse(JSON.stringify(cleanSession))
-  }
-  
+  cleanSession.hospitalId = hid
+  if (!data[hid]) data[hid] = {}
+  data[hid][String(userId)] = cleanSession
   localStorage.setItem('merchantChats', JSON.stringify(data))
 }
 
+// ==================== 加载聊天会话列表 ====================
+// 从 localStorage.merchantChats 读取所有属于本院的会话
+// 跨 hospitalId key 合并（处理 nearby_ 医院 ID 不一致的情况）
+// 商家端会话未读数 = 该会话中宠主发来且商家未读的消息数
 const loadSessions = () => {
   const hid = String(merchant.value?.hospitalId || '')
   const merchantName = merchant.value?.hospitalName || ''
@@ -838,14 +1000,10 @@ const loadSessions = () => {
       const latestName = localUser.nickname || localUser.username
       if (latestName && s.userName !== latestName) {
         s.userName = latestName
-        // 同步写回 localStorage，下次读取就是最新值
+        // 同步写回 localStorage（只写本院 key，不触碰其他医院空间）
         const data = JSON.parse(localStorage.getItem('merchantChats') || '{}')
-        if (s._sourceKeys && Array.isArray(s._sourceKeys)) {
-          s._sourceKeys.forEach(key => {
-            if (data[key] && data[key][uid]) {
-              data[key][uid].userName = latestName
-            }
-          })
+        if (data[hid] && data[hid][uid]) {
+          data[hid][uid].userName = latestName
           localStorage.setItem('merchantChats', JSON.stringify(data))
         }
       }
@@ -875,7 +1033,7 @@ const syncSessionUserNamesFromBackend = async (sessionList) => {
   )]
   if (dbUserIds.length === 0) return
   // 商家端请求必须显式带 merchantToken，避免被 axios 拦截器注入用户端 token
-  const token = localStorage.getItem('merchantToken')
+  const token = getMerchantToken()
   if (!token) return
   let updated = false
   for (const uid of dbUserIds) {
@@ -924,6 +1082,9 @@ const selectSession = (session) => {
   currentSession.value = JSON.parse(JSON.stringify(fresh))
 }
 
+// ==================== 打开聊天弹窗（从预约进入）====================
+// 商家端从预约卡片点击"沟通"进入，自动定位或创建对应宠主会话
+// 打开时将该会话未读数清零
 const openChat = (appt) => {
   const userId = appt.userId || ('user_' + appt.id)
   let session = sessions.value.find(s => String(s.userId) === String(userId) || s.appointmentId === appt.id)
@@ -997,6 +1158,9 @@ const addSystemMessage = (appt, content) => {
   }
 }
 
+// ==================== 发送消息 ====================
+// 商家发送的消息 from='merchant'，宠主端会显示在左侧
+// 关键：先从 localStorage 读取最新会话再追加，避免覆盖宠主刚发的消息
 const sendMessage = () => {
   if (!messageInput.value.trim() || !currentSession.value) return
   const userId = currentSession.value.userId
@@ -1018,40 +1182,71 @@ const sendMessage = () => {
 }
 
 const logout = () => {
-  localStorage.removeItem('merchantToken')
-  localStorage.removeItem('merchant')
+  // 只清理本标签页的商家会话；其他窗口的登录态不受影响
+  clearMerchantSession(getMerchantToken())
   router.push('/merchant/login')
 }
+
+// 跨标签页隔离：商家会话按标签页保存在 sessionStorage。
+// 同一浏览器另一个窗口登录其他医院只会改写 localStorage 的“最近一次登录”回退值，
+// 不会影响本标签页的 token 与商家身份，因此这里不监听 storage、也不 reload。
 
 // 定时轮询：刷新会话未读数 + 刷新预约（用户端新发消息/新预约实时同步）
 let pollTimer = null
 let polling = false  // 防重入标志：避免上一轮未完成就启动下一轮导致请求堆积
 
-onMounted(() => {
-  const m = localStorage.getItem('merchant')
-  if (!m) {
-    router.push('/merchant/login')
-    return
-  }
+// 从公开接口校正医院名称（切号后 localStorage 里可能残留上一家的名称）
+// 只校正展示名，不改变数据范围：范围始终由服务端 token 决定
+const syncHospitalNameFromServer = async () => {
+  const hid = merchant.value?.hospitalId
+  if (!hid) return
   try {
-    merchant.value = JSON.parse(m)
+    const res = await axios.get(`/hospitals/${hid}`)
+    const name = res && res.code === 200 ? (res.data?.name || '') : ''
+    if (name && merchant.value.hospitalName !== name) {
+      console.log('[MerchantHome] 校正医院名称:', merchant.value.hospitalName, '->', name)
+      merchant.value.hospitalName = name
+      updateMerchantProfile(merchant.value)
+    }
   } catch (e) {
-    console.error('[MerchantHome] merchant 数据损坏，清除并跳转登录页:', e)
-    localStorage.removeItem('merchant')
-    localStorage.removeItem('merchantToken')
+    // 名称校正失败不影响主流程与数据隔离
+  }
+}
+
+onMounted(() => {
+  // 商家身份只认本标签页的会话（sessionStorage 私有），
+  // 不再读取可能被其他窗口登录覆盖的全局 merchant/merchantToken 键
+  const session = getMerchantSession()
+  if (!session) {
     router.push('/merchant/login')
     return
   }
+
+  merchant.value = session.merchant
   console.log('[MerchantHome] 当前商家信息:', merchant.value)
-  // 检测 hospitalId 是否有效，无效则清除旧数据并静默跳转登录页
-  // 不弹 alert：用户主动进入商家工作台本就是要工作，跳到登录页看到表单就知道该登录
-  if (!merchant.value.hospitalId) {
-    console.warn('[MerchantHome] hospitalId 为空（旧版数据），清除并静默跳转登录页')
-    localStorage.removeItem('merchant')
-    localStorage.removeItem('merchantToken')
-    router.push('/merchant/login')
-    return
+
+  // token 才是服务端数据范围的唯一真源：资料与 token 不一致时只校正资料，不删除有效凭证
+  const payload = parseTokenPayload(session.token)
+  const tokenHid = payload && payload.hospitalId ? Number(payload.hospitalId) : null
+  if (tokenHid && String(merchant.value.hospitalId || '') !== String(tokenHid)) {
+    console.warn('[MerchantHome] 商家资料与 token 不一致，按 token 同步医院范围:', merchant.value.hospitalId, '->', tokenHid)
+    merchant.value = {
+      ...merchant.value,
+      id: payload.id,
+      username: payload.username,
+      role: 'merchant',
+      hospitalId: tokenHid,
+      hospitalName: ''
+    }
+    updateMerchantProfile(merchant.value)
   }
+  // 缺少 hospitalId 的旧账号/未绑定医院的商家：保留登录态，仅提示，不清理凭证
+  if (!merchant.value.hospitalId) {
+    console.warn('[MerchantHome] 缺少 hospitalId：数据范围仍由 token 决定，不清理凭证')
+    accessNotice.value = '未能识别商家所属医院，请联系管理员检查账号配置'
+  }
+
+  syncHospitalNameFromServer()
   loadAppointments()
   loadSessions()
   loadDoctors()
@@ -1109,6 +1304,18 @@ onUnmounted(() => {
   padding: 6px 12px;
   border-radius: 16px;
   border: 1px solid rgba(214, 112, 159, 0.15);
+}
+
+/* 数据隔离提示条 */
+.isolation-notice {
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #b4472f;
+  background: #fff5f0;
+  border: 1px solid #ffd6c5;
+  border-radius: 10px;
 }
 
 /* Tab 切换 */
@@ -1174,6 +1381,29 @@ onUnmounted(() => {
 
 .tab-content {
   padding: 15px;
+}
+
+/* 病历管理 */
+.records-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.records-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.records-hint {
+  font-size: 12px;
+  color: #b094b8;
+}
+
+.records-import {
+  display: block;
 }
 
 /* 状态筛选 */
@@ -1268,6 +1498,13 @@ onUnmounted(() => {
   margin-bottom: 6px;
 }
 
+.pet-code {
+  font-size: 12px;
+  color: var(--pm-primary);
+  opacity: 0.85;
+  word-break: break-all;
+}
+
 .info-label {
   color: #b094b8;
   min-width: 60px;
@@ -1318,6 +1555,13 @@ onUnmounted(() => {
   background: rgba(214, 112, 159, 0.1);
   color: #d6709f;
   border: 1px solid rgba(214, 112, 159, 0.25);
+}
+
+/* 查看病历：次要样式，不与确认/完成抢视觉重心 */
+.action-btn.records {
+  background: #fff;
+  color: #8a7a86;
+  border: 1px dashed #e7d3dd;
 }
 
 .action-btn:hover:not(:disabled) {
@@ -1746,6 +1990,30 @@ onUnmounted(() => {
 
 .required {
   color: #ff6b6b;
+}
+
+/* 完成就诊弹窗 */
+.complete-modal {
+  max-width: 440px;
+}
+
+.complete-hint {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: var(--pm-text-sub);
+}
+
+.complete-pet-code {
+  margin: -8px 0 12px;
+  font-size: 12px;
+  color: var(--pm-primary);
+  word-break: break-all;
+}
+
+.complete-tip {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pm-primary);
 }
 
 /* ===== 响应式 ===== */

@@ -143,6 +143,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import axios from '../api/axios'
+import { formatDateOnly } from '../utils/date'
 
 const router = useRouter()
 const route = useRoute()
@@ -192,10 +193,7 @@ const speciesEmojiMap = {
 }
 const getPetEmoji = (species) => speciesEmojiMap[species] || '🐾'
 
-const minDateStr = computed(() => {
-  const today = new Date()
-  return today.toISOString().split('T')[0]
-})
+const minDateStr = computed(() => formatDateOnly(new Date()))
 
 const timeSlots = computed(() => {
   const slots = []
@@ -277,7 +275,8 @@ const loadPets = async () => {
     return
   }
   try {
-    const res = await axios.get('/pets', { params: { userId: user.id } })
+    // 身份由后端从 token 解析，不再传 userId
+    const res = await axios.get('/pets')
     if (res.code === 200) {
       // 合并后端与本地（兼顾离线时新增的宠物）
       const mockPets = JSON.parse(localStorage.getItem('mockPets') || '[]')
@@ -295,6 +294,9 @@ const loadPets = async () => {
   }
 }
 
+// ==================== 加载医生列表 ====================
+// GET /api/hospitals/:id/doctors
+// 后端不可用时降级到内置默认医生列表，保证页面可用
 const loadDoctors = async () => {
   try {
     const res = await axios.get(`/hospitals/${hospitalId.value}/doctors`)
@@ -308,6 +310,21 @@ const loadDoctors = async () => {
       { id: 2, name: '李医生', title: '副主任医师', specialty: '内科诊疗', experienceYears: 10, rating: 4.7 },
       { id: 3, name: '赵医生', title: '主治医师', specialty: '影像诊断', experienceYears: 8, rating: 4.6 }
     ]
+  }
+}
+
+// ==================== 提交预约核心函数 ====================
+// POST /api/appointments
+// 流程：1.校验表单 → 2.读取登录用户 → 3.区分在线/离线模式提交
+// 离线模式：mock-token- 开头的 token 或 nearby_ 开头的医院ID，直接写 localStorage
+// 在线模式：调后端接口，失败时降级到 localStorage
+// 探测后端是否可达：用于区分"真离线"与"离线登录但网络正常"
+const isBackendReachable = async () => {
+  try {
+    const res = await axios.get('/health', { timeout: 2000 })
+    return !!res && res.code === 200
+  } catch (e) {
+    return false
   }
 }
 
@@ -334,10 +351,20 @@ const submitAppointment = async () => {
   submitting.value = true
   const selectedPetObj = pets.value.find(p => p.id === selectedPet.value)
 
-  // 离线用户（mock-token）或周边搜索医院（nearby_* ID）直接走 localStorage，避免后端 500
+  // ==================== 离线模式判定 ====================
+  // 周边搜索医院（nearby_* ID）不在数据库，只能存 localStorage
   const token = localStorage.getItem('token') || ''
   const isOfflineUser = token.startsWith('mock-token-')
   const isNearbyHospital = String(hospitalId.value).startsWith('nearby_')
+
+  // 离线登录（mock token）但后端其实可用：不能再往本地写，
+  // 否则预约只存在当前浏览器，管理员端与商家端都读不到
+  if (isOfflineUser && !isNearbyHospital && await isBackendReachable()) {
+    submitting.value = false
+    alert('当前为离线登录状态，预约无法同步到平台（管理员和商家看不到）。请重新登录后再提交。')
+    router.push('/login')
+    return
+  }
 
   if (isOfflineUser || isNearbyHospital) {
     const mockAppointments = JSON.parse(localStorage.getItem('mockAppointments') || '[]')
@@ -384,9 +411,9 @@ const submitAppointment = async () => {
     return
   }
 
+  // ==================== 在线模式：调后端接口 ====================
   try {
     const res = await axios.post('/appointments', {
-      userId: user.id,
       hospitalId: hospitalId.value,
       petId: selectedPet.value,
       doctorId: selectedDoctor.value || null,
@@ -407,8 +434,19 @@ const submitAppointment = async () => {
       alert(res.message || '预约失败')
     }
   } catch (error) {
-    console.error('[CreateAppointment] 预约失败，使用离线模式:', error)
-    // 离线模式：将预约保存到 localStorage
+    // 服务端已响应（400/401/403/500 等）：说明请求到达了后端但被拒绝，
+    // 不能再往 localStorage 写，否则用户以为成功、管理员和商家却看不到
+    if (error && error.response) {
+      const msg = (error.response.data && (error.response.data.message || error.response.data.msg))
+        || '预约提交失败，请稍后重试'
+      alert(msg)
+      submitting.value = false
+      return
+    }
+
+    // ==================== 仅网络不可达时才降级到离线模式 ====================
+    // 后端不可用时，将预约保存到 localStorage，保证用户体验
+    console.error('[CreateAppointment] 网络不可达，使用离线模式:', error)
     const mockAppointments = JSON.parse(localStorage.getItem('mockAppointments') || '[]')
     const newAppointment = {
       id: Date.now(),
@@ -452,9 +490,14 @@ const submitAppointment = async () => {
   }
 }
 
+// 返回上一页
 const goBack = () => router.back()
+// 跳转到添加宠物页（无宠物时引导）
 const goToAddPet = () => router.push('/pets/add')
 
+// ==================== 页面挂载时初始化 ====================
+// 依次加载：医院信息 → 当前用户宠物列表 → 该医院的医生列表
+// 若 URL 带 ?doctorId= 参数，自动预选该医生
 onMounted(() => {
   loadHospital()
   loadPets()

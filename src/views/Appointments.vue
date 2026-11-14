@@ -55,6 +55,10 @@
               <span class="value">{{ appointment.petName }}</span>
             </div>
             <div class="info-row">
+              <span class="label">宠物码</span>
+              <span class="value pet-code-value">{{ appointment.petUuid || '暂无宠物码' }}</span>
+            </div>
+            <div class="info-row">
               <span class="label">时间</span>
               <span class="value">{{ appointment.appointmentTime }}</span>
             </div>
@@ -194,6 +198,7 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '../api/axios'
+import { formatDateOnly } from '../utils/date'
 
 const router = useRouter()
 
@@ -233,6 +238,11 @@ const getStatusText = (status) => {
   return texts[status] || status
 }
 
+// ==================== 加载预约列表 ====================
+// GET /api/appointments?userId=&status=
+// 流程：1.读取登录用户 → 2.区分在线/离线模式获取数据 → 3.按状态筛选 → 4.按时间倒序
+// 离线模式：直接读 localStorage.mockAppointments
+// 在线模式：调后端接口，并合并本地未同步的预约
 const loadAppointments = async () => {
   loading.value = true
   let user
@@ -268,7 +278,8 @@ const loadAppointments = async () => {
   }
 
   try {
-    const params = { userId: user.id }
+    // 身份由后端从 token 解析，不再传 userId
+    const params = {}
     if (currentStatus.value !== 'all') {
       params.status = currentStatus.value
     }
@@ -277,7 +288,7 @@ const loadAppointments = async () => {
       // 归一化后端数据
       const backendAppointments = res.data.map(a => ({
         ...a,
-        appointmentTime: a.appointmentTime || (a.appointmentDate ? `${String(a.appointmentDate).slice(0, 10)} ${a.timeSlot || ''}`.trim() : ''),
+        appointmentTime: a.appointmentTime || (a.appointmentDate ? `${formatDateOnly(a.appointmentDate)} ${a.timeSlot || ''}`.trim() : ''),
         reviewed: a.reviewed !== undefined ? a.reviewed : !!a.hospitalFeedback
       }))
       // 合并 localStorage 中的离线预约（提交失败时可能存到了本地）
@@ -324,15 +335,20 @@ const loadAppointments = async () => {
   }
 }
 
+// ==================== 切换状态标签 ====================
+// 点击"待确认/已确认/已完成/已取消"切换筛选条件并重新加载
 const changeStatus = (status) => {
   currentStatus.value = status
   loadAppointments()
 }
 
+// ==================== 取消预约 ====================
+// PUT /api/appointments/:id/status
+// 离线预约（Date.now() ID 或 nearby_ 前缀）直接走 localStorage，不走后端
+// 取消后通过聊天系统消息通知商家端
 const handleCancel = async (appointment) => {
   if (!confirm('确定要取消此预约吗？')) return
 
-  // 离线预约（Date.now() ID 或 nearby_ 前缀）直接走 localStorage，不走后端
   const isOfflineAppt = String(appointment.id).length > 10 || String(appointment.id).startsWith('nearby_')
   
   if (isOfflineAppt) {
@@ -408,12 +424,17 @@ const notifyMerchantCancel = (appointment) => {
   writeSession(hospitalId, userId, session)
 }
 
+// ==================== 打开评价弹窗 ====================
+// 仅"已完成"且未评价的预约显示评价按钮
 const handleReview = (appointment) => {
   reviewingAppointment.value = appointment
   reviewForm.value = { rating: 5, content: '' }
   showReviewModal.value = true
 }
 
+// ==================== 提交评价 ====================
+// POST /api/appointments/:id/review
+// 后端不可用时降级到 localStorage 保存评价
 const submitReview = async () => {
   if (!reviewForm.value.content) {
     alert('请输入评价内容')
@@ -456,70 +477,28 @@ const submitReview = async () => {
 // 数据结构：merchantChats[hospitalIdKey][userId] = { userId, appointmentId, userName, petName, hospitalName, hospitalId, messages: [...] }
 // messages: [{ from: 'user'|'merchant', content, time, read, appointmentId }]
 
-// 医院名标准化（与商家端一致）
-const normalizeChatName = (name) => {
-  if (!name) return ''
-  let s = String(name)
-    .replace(/\s+/g, '')
-    .replace(/[（(].*?[)）]/g, '')
-    .replace(/·.*$/, '')
-    .toLowerCase()
-  return s
-}
-
-// 跨所有 key 读取会话（处理 nearby_ 医院和真实医院 key 不一致的情况）
-// hospitalName 参数：传入预约的医院名，用于精确匹配，避免取到其他医院的会话
+// 医院名标准化不再参与会话隔离（改由 hospitalId 严格判定）
+// 只按 hospitalId 精确读取会话：不再按医院名跨 key 匹配，避免同名/同品牌医院串数据
 const readSession = (hospitalId, userId, hospitalName) => {
   const data = JSON.parse(localStorage.getItem('merchantChats') || '{}')
   const hid = String(hospitalId)
   const uid = String(userId)
-
-  // 1. 优先精确匹配
-  if (data[hid]?.[uid]) {
-    return JSON.parse(JSON.stringify(data[hid][uid]))
-  }
-
-  // 2. 跨 key 匹配：必须用调用方传入的 hospitalName 匹配，避免取到其他医院的会话
-  if (!hospitalName) return null
-  const targetNorm = normalizeChatName(hospitalName)
-  if (!targetNorm) return null
-  for (const key of Object.keys(data)) {
-    if (key === hid) continue
-    const s = data[key]?.[uid]
-    if (s && s.hospitalName && normalizeChatName(s.hospitalName) === targetNorm) {
-      return JSON.parse(JSON.stringify(s))
-    }
-  }
-  return null
+  const s = data[hid]?.[uid]
+  if (!s) return null
+  // key 内也可能残留别院的旧会话，hospitalId 不一致一律不返回
+  if (s.hospitalId && String(s.hospitalId) !== hid) return null
+  return JSON.parse(JSON.stringify(s))
 }
 
-// 写入会话（写到指定 key，同时也写一份到匹配名称的其他 key 下，确保商家能看到）
+// 写入会话：只写当前医院自己的 key，不向其他医院空间扩散
 const writeSession = (hospitalId, userId, session) => {
-  const data = JSON.parse(localStorage.getItem('merchantChats') || '{}')
   const hid = String(hospitalId)
-  const uid = String(userId)
+  if (!hid) return
+  const data = JSON.parse(localStorage.getItem('merchantChats') || '{}')
   const cleanSession = JSON.parse(JSON.stringify(session))
-  const sName = normalizeChatName(session.hospitalName)
-  
-  // 要写入的 key 集合
-  const targetKeys = new Set([hid])
-  
-  // 同时写入名称匹配的其他 key（方便商家端无论用哪个 key 都能读到）
-  if (sName) {
-    for (const key of Object.keys(data)) {
-      if (key === hid) continue
-      const otherSession = data[key]?.[uid]
-      if (otherSession && normalizeChatName(otherSession.hospitalName) === sName) {
-        targetKeys.add(key)
-      }
-    }
-  }
-  
-  for (const key of targetKeys) {
-    if (!data[key]) data[key] = {}
-    data[key][uid] = JSON.parse(JSON.stringify(cleanSession))
-  }
-  
+  cleanSession.hospitalId = hid
+  if (!data[hid]) data[hid] = {}
+  data[hid][String(userId)] = cleanSession
   localStorage.setItem('merchantChats', JSON.stringify(data))
 }
 
@@ -545,7 +524,10 @@ const unreadCountOf = (appointment) => {
 // 轮询触发渲染前清空缓存，让下一次渲染重新计算
 const clearUnreadCache = () => unreadCache.clear()
 
-// 打开聊天弹窗
+// ==================== 打开聊天弹窗 ====================
+// 宠主与商家在线沟通，数据存储在 localStorage.merchantChats
+// 数据结构：merchantChats[hospitalIdKey][userId] = { messages: [...] }
+// 打开弹窗时自动将该预约的商家消息标为已读
 const openChat = (appointment) => {
   const user = JSON.parse(localStorage.getItem('user') || '{}')
   const hospitalId = String(appointment.hospitalId || appointment.hospital_id || '')
@@ -617,9 +599,10 @@ const goToPets = () => router.push('/pets')
 const goToProfile = () => router.push('/profile')
 
 let pollTimer = null
+// ==================== 页面挂载时初始化 ====================
+// 加载预约列表 + 启动 2 秒轮询（实时刷新未读消息数）
 onMounted(() => {
   loadAppointments()
-  // 每 2 秒轮询一次聊天数据，让未读消息数实时更新
   pollTimer = setInterval(() => {
     // 清空未读数缓存，让下一次渲染重新计算
     clearUnreadCache()
@@ -733,6 +716,12 @@ onUnmounted(() => {
 .value {
   flex: 1;
   color: #5a4a5a;
+}
+
+.pet-code-value {
+  font-size: 12px;
+  color: #b094b8;
+  word-break: break-all;
 }
 
 .appointment-footer {

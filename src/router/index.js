@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getMerchantToken } from '../utils/merchantSession'
 
 const routes = [
   {
@@ -98,17 +99,18 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   // 商家路由：需要商家 token（注册页除外）
   if (to.path.startsWith('/merchant') && to.path !== '/merchant/login' && to.path !== '/merchant/register') {
-    const merchantToken = localStorage.getItem('merchantToken')
+    // 商家 token 取本标签页固定的会话，避免被其他窗口登录的医院覆盖
+    const merchantToken = getMerchantToken()
     if (!merchantToken) {
       next('/merchant/login')
       return
     }
   }
-  // 管理员路由：需要管理员 token
+  // 管理员路由：需要管理员独立 token + 角色校验
   if (to.path.startsWith('/admin')) {
-    const token = localStorage.getItem('token')
-    const user = JSON.parse(localStorage.getItem('user') || '{}')
-    if (!token || user.role !== 'admin') {
+    const adminToken = localStorage.getItem('adminToken')
+    const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}')
+    if (!adminToken || adminUser.role !== 'admin') {
       next('/login')
       return
     }

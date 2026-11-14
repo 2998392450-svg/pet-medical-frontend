@@ -39,6 +39,10 @@
               <span class="info-value">{{ appointment.petName }}</span>
             </div>
             <div class="info-item">
+              <span class="info-label">宠物码</span>
+              <span class="info-value pet-code-value">{{ appointment.petUuid || '暂无宠物码' }}</span>
+            </div>
+            <div class="info-item">
               <span class="info-label">预约时间</span>
               <span class="info-value">{{ appointment.appointmentTime }}</span>
             </div>
@@ -196,6 +200,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../api/axios'
+import { formatDateOnly } from '../utils/date'
 
 const route = useRoute()
 const router = useRouter()
@@ -222,10 +227,7 @@ const minDate = computed(() => {
   return new Date(today.getTime() + 24 * 60 * 60 * 1000)
 })
 
-const minDateStr = computed(() => {
-  const today = new Date()
-  return today.toISOString().split('T')[0]
-})
+const minDateStr = computed(() => formatDateOnly(new Date()))
 
 // 是否有可执行的按钮（决定底部按钮区是否显示）
 const hasActions = computed(() => {
@@ -253,6 +255,14 @@ const getTypeText = (type) => {
 const loadAppointmentDetail = async () => {
   loading.value = true
   const id = route.params.id
+  // 离线用户（mock-token）不请求后端，直接读 localStorage
+  const token = localStorage.getItem('token') || ''
+  if (token.startsWith('mock-token-')) {
+    const mockAppointments = JSON.parse(localStorage.getItem('mockAppointments') || '[]')
+    appointment.value = mockAppointments.find(a => String(a.id) === String(id)) || null
+    loading.value = false
+    return
+  }
   try {
     const res = await axios.get(`/appointments/${id}`)
     if (res.code === 200) {
@@ -263,7 +273,7 @@ const loadAppointmentDetail = async () => {
       }
       appointment.value = {
         ...a,
-        appointmentTime: a.appointmentTime || (a.appointmentDate ? `${String(a.appointmentDate).slice(0, 10)} ${a.timeSlot || ''}`.trim() : ''),
+        appointmentTime: a.appointmentTime || (a.appointmentDate ? `${formatDateOnly(a.appointmentDate)} ${a.timeSlot || ''}`.trim() : ''),
         type: a.type || a.reason || 'checkup',
         reviewed: a.reviewed !== undefined ? a.reviewed : !!a.hospitalFeedback,
         review
@@ -417,6 +427,12 @@ onMounted(() => {
   flex: 1;
   color: var(--pm-text-main);
   word-break: break-word;
+}
+
+.pet-code-value {
+  font-size: 12px;
+  color: var(--pm-text-sub);
+  word-break: break-all;
 }
 
 /* 评价内容 */

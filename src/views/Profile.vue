@@ -248,8 +248,9 @@ const loadUserInfo = async () => {
 const loadStats = async (userId) => {
   try {
     const [petsRes, apptsRes] = await Promise.all([
-      axios.get('/pets', { params: { userId } }).catch(() => ({ code: 500, data: [] })),
-      axios.get('/appointments', { params: { userId } }).catch(() => ({ code: 500, data: [] }))
+      // 身份由后端从 token 解析，不再传 userId
+      axios.get('/pets').catch(() => ({ code: 500, data: [] })),
+      axios.get('/appointments').catch(() => ({ code: 500, data: [] }))
     ])
     // 宠物：合并数据库 + localStorage 新增的
     const mockPets = JSON.parse(localStorage.getItem('mockPets') || '[]')

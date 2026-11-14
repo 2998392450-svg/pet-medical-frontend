@@ -26,6 +26,7 @@
             v-for="pet in pets"
             :key="pet.id"
             class="pm-list-card pet-card"
+            @click="goToPetDetail(pet.id)"
           >
             <div class="pet-avatar">
               <img v-if="pet.avatar" :src="pet.avatar" alt="宠物头像" />
@@ -39,10 +40,11 @@
               </div>
               <p class="pet-age">年龄: {{ pet.age || '未知' }}岁</p>
               <p class="pet-weight">体重: {{ pet.weight || '未知' }}kg</p>
+              <p class="pet-code">宠物码：{{ pet.petUuid || '暂无宠物码' }}</p>
             </div>
             <div class="pet-actions">
-              <button class="pm-btn pm-btn-sm pm-btn-outline" @click="goToEditPet(pet)">编辑</button>
-              <button class="pm-btn pm-btn-sm delete-btn" @click="deletePet(pet)">删除</button>
+              <button class="pm-btn pm-btn-sm pm-btn-outline" @click.stop="goToEditPet(pet)">编辑</button>
+              <button class="pm-btn pm-btn-sm delete-btn" @click.stop="deletePet(pet)">删除</button>
             </div>
           </div>
         </div>
@@ -126,7 +128,8 @@ const loadPets = async () => {
     return
   }
   try {
-    const res = await axios.get('/pets', { params: { userId: user.id } })
+    // 身份由后端从 token 解析，不再传 userId
+    const res = await axios.get('/pets')
     if (res.code === 200) {
       // 合并 localStorage 中可能存在的离线数据
       const mockPets = JSON.parse(localStorage.getItem('mockPets') || '[]')
@@ -154,7 +157,7 @@ const deletePet = async (pet) => {
 
   let deleted = false
   try {
-    const res = await axios.delete(`/pets/${pet.id}`, { params: { userId: user.id } })
+    const res = await axios.delete(`/pets/${pet.id}`)
     if (res && (res.code === 200 || res.code === 0)) {
       deleted = true
     }
@@ -179,6 +182,7 @@ const deletePet = async (pet) => {
 
 const goBack = () => router.back()
 const goToAddPet = () => router.push('/pets/add')
+const goToPetDetail = (id) => router.push(`/pets/${id}`)
 const goToEditPet = (pet) => {
   // 把宠物数据存入 sessionStorage，编辑页可立即预填（后端不可用时也能用）
   sessionStorage.setItem('currentPet', JSON.stringify(pet))
@@ -215,7 +219,7 @@ onMounted(() => {
   align-items: center;
   gap: 14px;
   margin-bottom: 0;
-  cursor: default;
+  cursor: pointer;
 }
 
 .pet-card:hover {
@@ -270,6 +274,14 @@ onMounted(() => {
   font-size: 13px;
   color: var(--pm-text-sub);
   margin: 2px 0;
+}
+
+.pet-code {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--pm-primary);
+  opacity: 0.85;
+  word-break: break-all;
 }
 
 .pet-actions {

@@ -27,9 +27,23 @@
           <div class="pet-name-overlay">
             <h2>{{ pet.name }}</h2>
             <p>{{ getSpeciesText(pet.species) }}</p>
+            <p class="pet-code-overlay">宠物码：{{ pet.petUuid || '暂无宠物码' }}</p>
           </div>
         </div>
 
+        <!-- 详情 Tab 切换 -->
+        <div class="detail-tabs">
+          <span
+            :class="['detail-tab', { active: activeTab === 'basic' }]"
+            @click="activeTab = 'basic'"
+          >基本信息</span>
+          <span
+            :class="['detail-tab', { active: activeTab === 'records' }]"
+            @click="activeTab = 'records'"
+          >就诊记录</span>
+        </div>
+
+        <template v-if="activeTab === 'basic'">
         <!-- 基本信息卡片 -->
         <div class="pm-section">
           <h3 class="pm-section-title">基本信息</h3>
@@ -81,6 +95,9 @@
           </div>
         </div>
 
+        </template>
+        <PetMedicalRecordTab v-else :pet="pet" />
+
         <!-- 操作按钮 -->
         <div class="pm-bottom-action">
           <button class="pm-btn" @click="goToEdit">编辑信息</button>
@@ -97,12 +114,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import axios from '../api/axios'
+import PetMedicalRecordTab from '../components/pet/PetMedicalRecordTab.vue'
 
 const router = useRouter()
 const route = useRoute()
 
 const pet = ref(null)
 const loading = ref(true)
+const activeTab = ref('basic')
 
 const speciesEmojiMap = {
   dog: '🐕', cat: '🐱', rabbit: '🐰', hamster: '🐹',
@@ -304,6 +323,14 @@ onMounted(() => {
   opacity: 0.9;
 }
 
+.pet-name-overlay .pet-code-overlay {
+  font-size: 12px;
+  margin-top: 2px;
+  opacity: 0.85;
+  word-break: break-all;
+  max-width: 260px;
+}
+
 /* 气泡 */
 .pet-bubble {
   position: absolute;
@@ -467,5 +494,32 @@ onMounted(() => {
   background: rgba(244, 67, 54, 0.18);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(244, 67, 54, 0.15);
+}
+
+/* ===== 详情 Tab ===== */
+.detail-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: var(--pm-radius-md);
+}
+
+.detail-tab {
+  flex: 1;
+  text-align: center;
+  padding: 9px 0;
+  font-size: 14px;
+  color: var(--pm-text-sub);
+  border-radius: var(--pm-radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.detail-tab.active {
+  background: var(--pm-primary);
+  color: #fff;
+  font-weight: 600;
 }
 </style>

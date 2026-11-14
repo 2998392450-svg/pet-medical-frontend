@@ -74,6 +74,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '@/api/axios'
+import { saveMerchantLogin } from '@/utils/merchantSession'
 
 const router = useRouter()
 const showPwd = ref(false)
@@ -112,8 +113,8 @@ const handleLogin = async () => {
       if (!hospitalId) {
         console.warn('[MerchantLogin] 警告：未获取到 hospitalId，商家端将无法查询本医院预约')
       }
-      localStorage.setItem('merchantToken', token)
-      localStorage.setItem('merchant', JSON.stringify(merchant))
+      // 写入本标签页私有会话（同时更新旧键）；同浏览器其他窗口登录别的医院时不会覆盖本窗口身份
+      saveMerchantLogin(token, merchant)
       console.log('[MerchantLogin] 登录成功，保存的 merchant 对象:', merchant)
       if (!hospitalId) {
         alert('警告：未获取到 hospitalId，预约和消息功能将无法使用')

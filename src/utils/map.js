@@ -254,7 +254,7 @@ export const searchNearbyHospitals = (city = '上海', keyword = '宠物医院')
  * @returns {Promise<Array>} 医院列表
  */
 export const searchHospitalsByAgentPlan = async (centerPoint, region = '上海市') => {
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+  const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080/api' : '')
   const params = new URLSearchParams({ region })
   if (centerPoint && centerPoint.lat && centerPoint.lng) {
     params.set('lat', centerPoint.lat)

@@ -321,8 +321,8 @@ const submitForm = async () => {
   const token = localStorage.getItem('token') || ''
   const isOfflineUser = token.startsWith('mock-token-')
 
+  // userId 不再提交，后端统一取 token 身份；离线分支仍用 user.id 归属本地数据
   const petData = {
-    userId: user.id,
     name: petForm.name,
     species: petForm.species,
     breed: petForm.breed,
@@ -347,7 +347,8 @@ const submitForm = async () => {
       localStorage.setItem('mockPets', JSON.stringify(pets))
       alert('修改成功')
     } else {
-      const newPet = { ...petData, id: Date.now() }
+      // 离线数据仍需 userId 归属，供列表按本地用户过滤
+      const newPet = { ...petData, userId: user.id, id: Date.now() }
       pets.push(newPet)
       localStorage.setItem('mockPets', JSON.stringify(pets))
       alert('添加成功')
@@ -394,7 +395,7 @@ const submitForm = async () => {
       localStorage.setItem('mockPets', JSON.stringify(pets))
     } else {
       const pets = JSON.parse(localStorage.getItem('mockPets') || '[]')
-      pets.push({ ...petData, id: Date.now() })
+      pets.push({ ...petData, userId: user.id, id: Date.now() })
       localStorage.setItem('mockPets', JSON.stringify(pets))
     }
     alert(isEdit.value ? '修改成功（离线模式）' : '添加成功（离线模式）')
